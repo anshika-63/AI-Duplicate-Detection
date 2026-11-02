@@ -232,12 +232,38 @@ class UnifiedDetector:
         logger.info("Document detection identified %d matching pair(s).", added_pairs)
         return added_pairs
 
+    def run_classification(self, inventory: ScanInventory) -> list:
+        """
+        Executes Module 4: 16-Class Document Classification on documents and scanned images.
+        """
+        target_files = inventory.documents + [
+            f for f in inventory.images if f.extension in OCR_ELIGIBLE_EXTENSIONS
+        ]
+        if not target_files:
+            return []
+
+        logger.info("Executing 16-Class Document Classification on %d files...", len(target_files))
+        from document_classification import DocumentClassifier
+        classifier = DocumentClassifier()
+
+        results = []
+        for f in target_files:
+            try:
+                res = classifier.classify_document(f.path)
+                results.append(res)
+                logger.info(" - %s: %s (Confidence: %.1f%%)", f.file_name, res.predicted_category, res.confidence * 100)
+            except Exception as e:
+                logger.warning("Could not classify '%s': %s", f.file_name, e)
+
+        return results
+
     def run(
         self,
         run_exact: bool = True,
         run_images: bool = True,
         run_documents: bool = True,
-    ) -> Tuple[List[DuplicateRecord], ExecutionSummary]:
+        run_classification_flag: bool = False,
+    ) -> Tuple[List[DuplicateRecord], ExecutionSummary, list]:
         """
         Orchestrates full detection pipeline and generates combined report.
         """
@@ -248,8 +274,8 @@ class UnifiedDetector:
         inventory = scan_directory(
             self.target_folder,
             recursive=True,
-            include_images=run_images or run_exact,
-            include_documents=run_documents or run_exact,
+            include_images=run_images or run_exact or run_classification_flag,
+            include_documents=run_documents or run_exact or run_classification_flag,
         )
 
         # Step 2: Route and execute selected modules
@@ -261,6 +287,10 @@ class UnifiedDetector:
 
         if run_documents:
             self.run_document_detection(inventory)
+
+        classification_results = []
+        if run_classification_flag:
+            classification_results = self.run_classification(inventory)
 
         # Step 3: Collect deduplicated canonical records
         records = self.result_manager.get_records()
@@ -274,9 +304,10 @@ class UnifiedDetector:
             total_scanned=inventory.total_count,
             duration=duration,
             report_path=out_csv,
+            classified_count=len(classification_results),
         )
 
-        return records, summary
+        return records, summary, classification_results
 
 
 def main():
@@ -311,6 +342,16 @@ def main():
         help="Run document similarity detection using TF-IDF & Cosine Similarity",
     )
     parser.add_argument(
+        "--classification",
+        action="store_true",
+        help="Run 16-class document classification on documents and scanned images",
+    )
+    parser.add_argument(
+        "--orb",
+        action="store_true",
+        help="Enable ORB feature matching with RANSAC homography for geometric attacks",
+    )
+    parser.add_argument(
         "--threshold",
         type=float,
         default=DEFAULT_SIMILARITY_THRESHOLD,
@@ -339,10 +380,11 @@ def main():
     args = parser.parse_args()
 
     # Determine execution scope
-    run_all = args.all or (not args.exact and not args.images and not args.documents)
+    run_all = args.all or (not args.exact and not args.images and not args.documents and not args.classification)
     run_exact = run_all or args.exact
     run_images = run_all or args.images
     run_docs = run_all or args.documents
+    run_class = run_all or args.classification
 
     detector = UnifiedDetector(
         target_folder=args.folder,
@@ -351,16 +393,19 @@ def main():
         report_output=args.output,
     )
 
-    records, summary = detector.run(
+    records, summary, class_results = detector.run(
         run_exact=run_exact,
         run_images=run_images,
         run_documents=run_docs,
+        run_classification_flag=run_class,
     )
 
     if args.db:
         from database_manager import DatabaseManager
         db = DatabaseManager(args.db)
         db.save_results(records)
+        if class_results:
+            db.save_classification_results(class_results)
         db.log_scan(
             scanned_folder=str(detector.target_folder),
             total_files=summary.total_files_scanned,

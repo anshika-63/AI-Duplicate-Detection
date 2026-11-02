@@ -196,6 +196,7 @@ def categorize_duplicate(
     phash_dist: int,
     dhash_dist: int,
     threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
+    allow_single_hash: bool = False,
 ) -> Tuple[str, bool]:
     """
     Categorizes the relationship between two images based on hash metrics.
@@ -203,8 +204,8 @@ def categorize_duplicate(
     Categories:
     - Exact Duplicate: 100% similarity on both hashes (0 distance).
     - Near Duplicate: Both hashes meet or exceed the similarity threshold.
-    - Potential Near-Duplicate: At least one hash meets or exceeds threshold.
-    - Non-Duplicate: Neither hash meets the threshold.
+    - Potential Near-Duplicate: At least one hash meets threshold while the other is close (>= 75.0%).
+    - Non-Duplicate: Neither hash meets threshold, or severe hash divergence indicates background/gradient correlation.
 
     Returns:
         Tuple of (category_name, is_duplicate_boolean).
@@ -215,7 +216,11 @@ def categorize_duplicate(
     if phash_sim >= threshold and dhash_sim >= threshold:
         return "Near Duplicate", True
 
-    if phash_sim >= threshold or dhash_sim >= threshold:
+    # Require minimum cross-validation when one hash is elevated to guard against gradient false-positives
+    if (phash_sim >= threshold and dhash_sim >= 75.0) or (dhash_sim >= threshold and phash_sim >= 75.0):
+        return "Potential Near-Duplicate", True
+
+    if allow_single_hash and (phash_sim >= threshold or dhash_sim >= threshold):
         return "Potential Near-Duplicate", True
 
     return "Non-Duplicate", False

@@ -51,6 +51,7 @@ class ExecutionSummary:
     total_detected_pairs: int
     scan_duration_seconds: float
     output_report_file: str
+    classified_documents: int = 0
 
     def print_summary(self):
         """Prints formatted summary to console."""
@@ -63,6 +64,8 @@ class ExecutionSummary:
         print(f"Near-duplicate document pairs:     {self.near_duplicate_document_pairs}")
         if self.cross_format_pairs > 0:
             print(f"Cross-format document pairs:       {self.cross_format_pairs}")
+        if self.classified_documents > 0:
+            print(f"Classified documents (16-class):   {self.classified_documents}")
         print(f"Total detected duplicate pairs:    {self.total_detected_pairs}")
         print(f"Scan duration:                     {self.scan_duration_seconds:.2f}s")
         print(f"Combined report generated:         {self.output_report_file}")
@@ -108,6 +111,7 @@ def calculate_execution_summary(
     total_scanned: int,
     duration: float,
     report_path: Union[str, Path] = COMBINED_REPORT_DEFAULT,
+    classified_count: int = 0,
 ) -> ExecutionSummary:
     """
     Aggregates metrics directly from detected duplicate records.
@@ -141,5 +145,6 @@ def calculate_execution_summary(
         total_detected_pairs=len(records),
         scan_duration_seconds=duration,
         output_report_file=str(report_path),
+        classified_documents=classified_count,
     )
 

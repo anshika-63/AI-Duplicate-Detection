@@ -1,0 +1,19 @@
+class_name,precision,recall,f1_score,support
+letter,0.7969,0.8226,0.8095,62
+form,0.8667,0.8387,0.8525,62
+email,0.9365,0.9516,0.944,62
+handwritten,0.9524,0.9677,0.96,62
+advertisement,0.9672,0.9516,0.9593,62
+scientific report,0.8163,0.6452,0.7207,62
+scientific publication,0.9474,0.871,0.9076,62
+specification,0.9206,0.9355,0.928,62
+file folder,0.9375,0.9677,0.9524,62
+news article,0.8939,0.9516,0.9219,62
+budget,0.9074,0.7903,0.8448,62
+invoice,0.8226,0.8226,0.8226,62
+presentation,0.8028,0.9194,0.8571,62
+questionnaire,0.8793,0.8226,0.85,62
+resume,0.9194,0.9194,0.9194,62
+memo,0.6667,0.8065,0.7299,62
+macro avg,0.8771,0.874,0.8737,992
+weighted avg,0.8771,0.874,0.8737,992

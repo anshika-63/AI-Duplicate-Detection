@@ -22,13 +22,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-# Allowed standardized duplicate categories
+# Allowed standardized duplicate categories and their priority hierarchy
 VALID_DUPLICATE_CATEGORIES = {
     "exact_duplicate",
     "near_duplicate_image",
     "near_duplicate_document",
     "cross_format_document",
     "possible_duplicate",
+}
+
+CATEGORY_PRIORITY = {
+    "exact_duplicate": 5,
+    "near_duplicate_image": 4,
+    "near_duplicate_document": 4,
+    "cross_format_document": 3,
+    "possible_duplicate": 2,
+    "non_duplicate": 1,
 }
 
 
@@ -122,10 +131,19 @@ class ResultManager:
             # Merge algorithm details if this pair was already detected by another algorithm
             existing = self._records[key]
 
-            # If the new finding is higher priority (e.g. exact_duplicate > near_duplicate)
-            if duplicate_type == "exact_duplicate" or existing.duplicate_type != "exact_duplicate":
+            # Priority-aware update: only upgrade, never downgrade category
+            new_prio = CATEGORY_PRIORITY.get(duplicate_type, 1)
+            exist_prio = CATEGORY_PRIORITY.get(existing.duplicate_type, 1)
+
+            if new_prio > exist_prio:
                 existing.duplicate_type = duplicate_type
                 existing.similarity_score = max(existing.similarity_score, normalized_score)
+            elif new_prio == exist_prio:
+                existing.similarity_score = max(existing.similarity_score, normalized_score)
+
+            # A confirmed exact duplicate always stays at 100% and cannot be downgraded
+            if existing.duplicate_type == "exact_duplicate":
+                existing.similarity_score = 100.0
 
             if detection_algorithm not in existing.detection_algorithm:
                 existing.detection_algorithm = f"{existing.detection_algorithm} | {detection_algorithm}"

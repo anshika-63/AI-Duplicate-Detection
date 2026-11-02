@@ -70,7 +70,22 @@ class DatabaseManager:
                 """
             )
 
-            # 3. SCAN_HISTORY table
+            # 3. CLASSIFICATION_RESULTS table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS classification_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_id INTEGER NOT NULL,
+                    predicted_class TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    model_name TEXT NOT NULL,
+                    classified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (file_id) REFERENCES files (id)
+                );
+                """
+            )
+
+            # 4. SCAN_HISTORY table
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS scan_history (
@@ -173,6 +188,31 @@ class DatabaseManager:
                 )
                 saved_count += 1
 
+            conn.commit()
+        return saved_count
+
+    def save_classification_results(self, results: list) -> int:
+        """Stores document classification predictions."""
+        saved_count = 0
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for r in results:
+                file_id = self.upsert_file(
+                    file_path=r.file_path,
+                    filename=r.file_name,
+                    extension=Path(r.file_path).suffix.lower(),
+                    file_size=Path(r.file_path).stat().st_size if Path(r.file_path).exists() else 0,
+                    file_type="document",
+                    conn=conn,
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO classification_results (file_id, predicted_class, confidence, model_name)
+                    VALUES (?, ?, ?, ?);
+                    """,
+                    (file_id, r.predicted_category, r.confidence, r.model_name),
+                )
+                saved_count += 1
             conn.commit()
         return saved_count
 

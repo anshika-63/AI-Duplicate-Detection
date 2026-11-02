@@ -16,6 +16,7 @@ Features:
 import logging
 import os
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
@@ -59,10 +60,12 @@ _DOCUMENT_TEXT_CACHE: Dict[str, str] = {}
 def preprocess_text(text: str) -> str:
     """
     Cleans and normalizes text for NLP similarity.
-    Converts to lowercase and normalizes whitespace.
+    Converts unicode ligatures/accents, converts to lowercase, and normalizes whitespace.
     """
     if not text:
         return ""
+    # Unicode NFKD normalization (e.g. transforms ligatures like 'fi' -> 'f'+'i' and standardizes quotes)
+    text = unicodedata.normalize("NFKD", text)
     text = text.lower()
     text = " ".join(text.split())
     return text
@@ -159,7 +162,14 @@ def extract_text_from_docx(file_path: Union[str, Path]) -> str:
         try:
             import docx
             doc = docx.Document(path)
-            return "\n".join([p.text for p in doc.paragraphs if p.text])
+            parts = [p.text for p in doc.paragraphs if p.text]
+            # Also extract table text so tabular documents (invoices, forms) are fully represented
+            for table in doc.tables:
+                for row in table.rows:
+                    row_parts = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                    if row_parts:
+                        parts.append(" | ".join(row_parts))
+            return "\n".join(parts)
         except ImportError:
             pass
 
@@ -169,13 +179,37 @@ def extract_text_from_docx(file_path: Union[str, Path]) -> str:
                 return ""
             xml_content = z.read("word/document.xml")
             tree = ET.fromstring(xml_content)
-            # Find all text elements in the word namespace
+
+            ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+            body = tree.find("w:body", ns)
+
+            lines = []
+            if body is not None:
+                for elem in body:
+                    tag = elem.tag.split("}")[-1]
+                    if tag == "p":
+                        p_text = "".join(node.text for node in elem.iter() if node.tag.endswith("}t") and node.text)
+                        if p_text.strip():
+                            lines.append(p_text.strip())
+                    elif tag == "tbl":
+                        for row in elem.findall(".//w:tr", ns):
+                            cells = []
+                            for cell in row.findall(".//w:tc", ns):
+                                c_text = "".join(node.text for node in cell.iter() if node.tag.endswith("}t") and node.text)
+                                if c_text.strip():
+                                    cells.append(c_text.strip())
+                            if cells:
+                                lines.append(" | ".join(cells))
+            if lines:
+                return "\n".join(lines)
+
+            # Fallback if specific body structure is absent
             texts = [
                 node.text
                 for node in tree.iter()
                 if node.tag.endswith("}t") and node.text
             ]
-            return " ".join(texts)
+            return "\n".join(texts)
     except Exception as e:
         logger.warning("DOCX extraction failed for %s: %s", path, e)
         return ""

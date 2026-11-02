@@ -352,7 +352,7 @@ class TestUnifiedIntegration(unittest.TestCase):
         """Test 14: An end-to-end run on a mixed folder should detect exact, image, and document duplicates."""
         out_csv = self.dir_path / "mixed_test_report.csv"
         detector = UnifiedDetector(self.dir_path, threshold=80.0, report_output=out_csv)
-        records, summary = detector.run(run_exact=True, run_images=True, run_documents=True)
+        records, summary, *extra = detector.run(run_exact=True, run_images=True, run_documents=True)
 
         self.assertGreater(summary.exact_duplicate_pairs, 0)
         self.assertGreater(summary.near_duplicate_image_pairs, 0)

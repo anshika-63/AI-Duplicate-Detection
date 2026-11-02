@@ -1,0 +1,13 @@
+transformation,algorithm,test_pairs,recall_detected,avg_similarity_score,note
+Crop 70% Area,pHash,25,0.04,59.75,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Crop 70% Area,dHash,25,0.16,61.94,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Crop 70% Area,ORB,25,1.0,100.0,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Crop 50% Area,pHash,25,0.0,51.5,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Crop 50% Area,dHash,25,0.08,56.06,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Crop 50% Area,ORB,25,0.88,93.87,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Rotate 15 deg,pHash,25,0.0,59.25,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Rotate 15 deg,dHash,25,0.16,66.88,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Rotate 15 deg,ORB,25,1.0,100.0,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Rotate 90 deg,pHash,25,0.0,49.75,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Rotate 90 deg,dHash,25,0.0,52.69,Synthetic transformation on INRIA Originals (Not official Copydays crops)
+Rotate 90 deg,ORB,25,1.0,100.0,Synthetic transformation on INRIA Originals (Not official Copydays crops)

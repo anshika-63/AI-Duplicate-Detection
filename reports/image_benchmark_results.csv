@@ -1,0 +1,4 @@
+accuracy,precision,recall,f1_score,fpr,fnr,roc_auc,tp,tn,fp,fn,algorithm,benchmark_dataset,threshold
+1.0,1.0,1.0,1.0,0.0,0.0,1.0,160,40,0,0,pHash,INRIA Copydays (JPEG Attacks),80.0
+1.0,1.0,1.0,1.0,0.0,0.0,1.0,160,40,0,0,dHash,INRIA Copydays (JPEG Attacks),80.0
+0.455,1.0,0.3187,0.4834,0.0,0.6813,0.9908,51,40,0,109,ORB,INRIA Copydays (JPEG Attacks),80.0
