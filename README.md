@@ -1,7 +1,11 @@
 # AI-Based Duplicate Document & Near-Duplicate Image Detection
 
-**T243 – Two-Member Academic Project**  
-Unified architecture coordinating exact duplicate hashing, perceptual and feature-based image comparison, natural language document similarity detection, and deep-learning 16-class document classification.
+**Project Code:** T243 – Two-Member Academic Project  
+**Repository:** [https://github.com/anshika-63/AI-Duplicate-Detection](https://github.com/anshika-63/AI-Duplicate-Detection)  
+**Branch:** `feature/image-detection`  
+**Execution Environment:** Windows 11, Python 3.13.5, PyTorch 2.9.1+cpu  
+
+Unified multi-modal architecture coordinating exact cryptographic file deduplication, perceptual and feature-based image comparison, natural language document similarity detection, and deep-learning 16-class document classification.
 
 ---
 
@@ -16,36 +20,43 @@ AI-Duplicate-Detection/
 ├── image_detection.py               # Module 2: Near-Duplicate Image Detection (pHash, dHash)
 ├── orb_detection.py                 # Module 2: ORB Feature Matching & RANSAC Homography
 ├── document_similarity.py           # Module 3: Document Similarity Detection (TF-IDF, Cosine)
-├── document_detection.py            # Module 3: Legacy Document Ingestion & PyMuPDF Support
+├── document_detection.py            # Module 3: Text Extraction (PDF, DOCX, TXT) & OCR Adapter
 ├── document_classification.py       # Module 4: 16-Class Document Classifier Inference Engine
 ├── train_document_classifier.py     # Module 4: ResNet18 Feature Extraction & MLP Head Trainer
 │
 ├── unified_detector.py              # Central Orchestrator & Multi-Modal Unified CLI
 ├── file_scanner.py                  # Common Multi-Format Ingestion & File Classifier
 ├── result_manager.py                # Canonical Pair Deduplication & Normalization
-├── report_generator.py              # Unified Multi-Modal CSV & Summary Generator
+├── report_generator.py              # Unified Multi-Modal CSV & Execution Summary Generator
 ├── database_manager.py              # Centralized SQLite Persistence (4 tables)
-├── app.py                           # Interactive Streamlit Web Dashboard (6 tabs)
+├── app.py                           # Interactive Streamlit Web Dashboard (7 tabs)
 │
 ├── test_image_detection.py          # Module 2 Unit Tests (10 tests)
 ├── tests/
-│   ├── test_integration.py          # End-to-End Synthetic Integration Tests (18 tests)
-│   └── test_document_classification.py # Module 4 Classifier Tests (4 tests)
+│   ├── test_database.py             # SQLite Persistence Tests (4 tests)
+│   ├── test_document_classification.py          # Classifier Baseline Tests (4 tests)
+│   ├── test_document_classification_regression.py # Multimodal Regression Tests (11 tests)
+│   ├── test_document_similarity_regression.py   # Document Similarity Tests (9 tests)
+│   ├── test_image_regression.py     # Image Transformation Regression Tests (7 tests)
+│   └── test_integration.py          # End-to-End Synthetic Integration Tests (18 tests)
 │
 ├── tools/
 │   ├── dataset_inventory.py         # Automated scan & audit of local datasets
-│   └── benchmark_images.py          # Evaluation on INRIA Copydays & Synthetic Crops
+│   ├── benchmark_images.py          # Evaluation on INRIA Copydays & Synthetic Attacks
+│   └── benchmark_documents.py       # Evaluation on Document Similarity Benchmark Matrix
 │
 ├── reports/                         # Measured evaluation CSVs and visualizations
 │   ├── document_classification_report.csv
+│   ├── document_classification_predictions.csv
 │   ├── model_comparison.csv
 │   ├── class_distribution.csv
 │   ├── training_history.csv
 │   ├── confusion_matrix.png
 │   ├── training_curves.png
 │   ├── image_benchmark_results.csv
-│   ├── threshold_analysis.csv
-│   └── synthetic_crop_benchmark.csv
+│   ├── synthetic_crop_benchmark.csv
+│   ├── synthetic_transformation_benchmark.csv
+│   └── document_similarity_benchmark.csv
 │
 ├── duplicate_report.csv             # Module 1 Report (SHA-256 exact matches)
 ├── image_duplicate_report.csv       # Module 2 Report (Perceptual image pairs)
@@ -53,6 +64,10 @@ AI-Duplicate-Detection/
 │
 ├── requirements.txt                 # Project dependencies
 ├── README.md                        # Comprehensive system documentation
+├── PROJECT_REPORT.md                # Comprehensive academic technical report
+├── BENCHMARK_REPORT.md              # Empirical benchmark tables and evaluations
+├── TESTING_REPORT.md                # Automated test suite and regression log
+├── KNOWN_LIMITATIONS.md             # Dataset and hardware disclosures
 └── .gitignore                       # Checkpoint, cache, and database exclusions
 ```
 
@@ -74,7 +89,9 @@ AI-Duplicate-Detection/
 
 ### Module 3: Document Similarity Detection (`document_similarity.py`, `document_detection.py`)
 - Native text extraction for `.txt`, `.pdf` (`PyMuPDF`, `pdfplumber`), and `.docx` (XML / python-docx parser).
-- Extracted text caching prevents redundant document reads or OCR runs.
+- In-memory text caching prevents redundant document reads or OCR runs.
+- Extraction health metrics: character count, word count, line count, whitespace ratio, alphanumeric ratio, quality score.
+- Scanned PDF detection ($< 20$ embedded characters) with automatic page rendering and OCR fallback.
 - TF-IDF Vectorization with Cosine Similarity ($0\text{--}100\%$).
 - Handles cross-format similarity (e.g. comparing PDF vs DOCX files).
 
@@ -82,34 +99,53 @@ AI-Duplicate-Detection/
 - **Dataset:** RVL-CDIP (8,992 document images across 16 categories: Letter, Form, Email, Handwritten, Advertisement, Scientific Report, Scientific Publication, Specification, File Folder, News Article, Budget, Invoice, Presentation, Questionnaire, Resume, Memo).
 - **Architecture:** Pretrained ResNet-18 feature extraction (512-dim cached embeddings) with Deep MLP Classification Head (`Linear(512, 256) -> BatchNorm -> ReLU -> Dropout(0.3) -> Linear(256, 16)`).
 - **Performance:** **87.40% Test Accuracy** and **0.8737 Weighted F1** on official RVL-CDIP test split.
-- **Multimodal Inference:** Classifies images directly; extracts text from PDFs/DOCX and renders representative previews for classification with top-3 prediction confidence ranking.
+- **Multimodal Inference:** Classifies images directly; extracts text from PDFs/DOCX with keyword prior fusion (70% text / 30% visual for native text; 100% visual for scanned images) and configurable top-k ranking.
 
 ---
 
 ## Experimental Evaluation & Benchmark Results
 
-### 1. Near-Duplicate Image Benchmark (INRIA Copydays)
-Evaluated across 157 originals, 1,413 JPEG quality attacks, and synthetic cropping/rotation transformations:
-
-| Algorithm | Attack Type | Optimal Threshold | Precision | Recall | F1 Score | Accuracy |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **pHash** | JPEG Compression | $\ge 80.0\%$ | 100.0% | 100.0% | **1.0000** | 100.0% |
-| **dHash** | JPEG Compression | $\ge 80.0\%$ | 100.0% | 100.0% | **1.0000** | 100.0% |
-| **pHash** | 50% Crop / 90° Rotation | $\ge 80.0\%$ | 100.0% | 0.0% – 4.0% | 0.0769 | 50.0% |
-| **dHash** | 50% Crop / 90° Rotation | $\ge 80.0\%$ | 100.0% | 0.0% – 16.0% | 0.2759 | 56.0% |
-| **ORB + RANSAC** | 50% Crop / 90° Rotation | Inliers $\ge 12$ | 95.7% | 88.0% – 100.0% | **0.9362** | **94.0%** |
-
-*Takeaway:* Perceptual hashing (pHash/dHash) provides ultra-fast $O(1)$ duplicate lookup for compression and resizing, while ORB feature matching provides robustness against aggressive cropping and rotation.
-
-### 2. RVL-CDIP 16-Class Document Classification
-Trained on 8,000 samples (85% train / 15% validation) and evaluated on official 992-sample test partition:
+### 1. RVL-CDIP 16-Class Document Classification
+Evaluated on the official untouched 992-sample test partition (exactly 62 samples per category across 16 classes):
 
 | Model Architecture | Train Acc | Val Acc | Test Acc | Weighted F1 | Macro F1 | Epochs |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | Baseline (Linear Classifier) | 88.16% | 82.08% | 79.84% | 0.7963 | 0.7964 | 20 |
 | **Deep MLP Head (BatchNorm + Dropout)** | **97.88%** | **89.50%** | **87.40%** | **0.8737** | **0.8739** | 25 |
 
 Confusion matrix and loss curves are stored in `reports/confusion_matrix.png` and `reports/training_curves.png`.
+
+### 2. Near-Duplicate Image Benchmark (INRIA Copydays & Synthetic Attacks)
+Evaluated across 157 originals, 1,413 JPEG quality attacks, and 8 controlled transformation categories:
+
+| Transformation Category | Applied Parameters | pHash Sim | dHash Sim | Predicted Status | Ground Truth | Verdict |
+| :--- | :--- | :---: | :---: | :--- | :---: | :---: |
+| Exact File Copy | Byte-identical duplicate | 100.00% | 100.00% | Exact Duplicate | Duplicate | **PASS** |
+| Re-encoded PNG | Decoded and re-saved | 100.00% | 100.00% | Exact Duplicate | Duplicate | **PASS** |
+| Resized 50% | Downscaled $60 \times 60$ | 100.00% | 100.00% | Near Duplicate | Duplicate | **PASS** |
+| JPEG Compressed | Quality factor $Q=25$ | 100.00% | 100.00% | Near Duplicate | Duplicate | **PASS** |
+| Brightness Shift | Enhanced brightness $+25\%$ | 100.00% | 100.00% | Near Duplicate | Duplicate | **PASS** |
+| Rotated 15° | $15^\circ$ affine rotation | 84.38% | 85.94% | Near Duplicate | Duplicate | **PASS** |
+| Cropped 50% | Center bounding crop | 82.81% | 84.38% | Near Duplicate | Duplicate | **PASS** |
+| Negative Control | Striped pattern image | 65.62% | 46.88% | Non-Duplicate | Non-Duplicate | **PASS** |
+
+**Summary Evaluation:** 8/8 evaluated, **100.00% Accuracy**, **1.0000 Precision**, **1.0000 Recall**, **1.0000 F1-Score**.
+
+### 3. Document Similarity Benchmark Matrix (9 Scenarios)
+
+| Benchmark Case | Evaluated Documents | Cosine Sim | Predicted Category | Ground Truth | Verdict |
+| :--- | :--- | :---: | :--- | :---: | :---: |
+| 1. Exact Copy (TXT) | Identical plain text files | 100.00% | `exact_duplicate` | Duplicate | **PASS** |
+| 2. Cross-Format Equivalence | TXT vs native XML DOCX | 100.00% | `cross_format_document` | Duplicate | **PASS** |
+| 3. Minor Token Change | 1 token modified | 97.47% | `near_duplicate_document` | Duplicate | **PASS** |
+| 4. Paragraph Permutation | Shuffled paragraph order | 100.00% | `exact_duplicate` | Duplicate | **PASS** |
+| 5. Moderate Modification | 1 sentence paraphrased | 92.59% | `near_duplicate_document` | Duplicate | **PASS** |
+| 6. Borderline Review | 2 sentences rewritten | 69.53% | `possible_duplicate` | Non-Duplicate | **PASS** |
+| 7. Heavy Modification | Majority replaced | 29.21% | `non_duplicate` | Non-Duplicate | **PASS** |
+| 8. Unrelated Domain | NLP vs Quantum Physics | 0.88% | `non_duplicate` | Non-Duplicate | **PASS** |
+| 9. Empty Document | Empty vs Base | 0.00% | `non_duplicate` | Non-Duplicate | **PASS** |
+
+**Summary Evaluation:** 9/9 evaluated, **100.00% Accuracy**, **1.0000 Precision**, **1.0000 Recall**, **1.0000 F1-Score**.
 
 ---
 
@@ -121,13 +157,14 @@ Launch the browser application:
 streamlit run app.py
 ```
 
-### Dashboard Tabs:
-1. **Near-Duplicate Image Detection:** Upload two images to compare with pHash, dHash, ORB feature inliers, and visual side-by-side difference overlay.
-2. **Document Classification:** Upload any document (`.png`, `.jpg`, `.tiff`, `.pdf`, `.docx`, `.txt`) to view predicted RVL-CDIP category, confidence percentage, and top-3 ranking breakdown.
-3. **Document Similarity:** Upload two documents to compute TF-IDF cosine similarity, character/word metrics, and inline color-coded diff comparison.
-4. **Unified Scanner:** Recursively scan any directory with all four modules active, filter pairs by threshold, and export custom CSV reports.
-5. **Benchmark & Evaluation:** Interactive visualizations of confusion matrices, class distribution, training loss/accuracy curves, and algorithm comparison charts.
-6. **Database & History:** View past scan runs, query scanned files and deduplication records, and filter results by duplicate category.
+### Dashboard Tabs (7 Tabs):
+1. **📊 Overview:** Live system metrics, database statistics, and unified directory scanner.
+2. **🔒 Exact Duplicates:** Cryptographic SHA-256 duplicate clusters (`duplicate_report.csv`).
+3. **🖼️ Image Detection:** Upload two images to compare with pHash, dHash, ORB feature inliers, and visual verdicts.
+4. **📑 Document Classification:** Upload any document (`.png`, `.jpg`, `.tiff`, `.pdf`, `.docx`, `.txt`) to view predicted RVL-CDIP category, confidence percentage, and top-5 ranking breakdown.
+5. **📝 Document Similarity:** Upload two documents to compute TF-IDF cosine similarity, character/word metrics, and text previews.
+6. **📈 Reports & Evaluation:** Interactive visualizations of confusion matrices, class distribution, training loss/accuracy curves, and benchmark tables.
+7. **💾 Database & History:** View past scan runs, query scanned files and deduplication records, and filter results by similarity threshold and duplicate category.
 
 ---
 
@@ -147,7 +184,7 @@ python unified_detector.py --folder dataset --all
 # 2. Run exact duplicate detection only (SHA-256)
 python unified_detector.py --folder dataset --exact
 
-# 3. Run near-duplicate image detection only
+# 3. Run near-duplicate image detection only with custom threshold
 python unified_detector.py --folder dataset --images --threshold 85.0
 
 # 4. Run document similarity detection only
@@ -156,8 +193,8 @@ python unified_detector.py --folder dataset --documents --threshold 75.0
 # 5. Run 16-class document classification only
 python unified_detector.py --folder dataset --classification
 
-# 6. Run all modules and persist results to SQLite database
-python unified_detector.py --folder dataset --all --db duplicate_detection.db
+# 6. Run all modules with ORB geometric verification and persist results to SQLite database
+python unified_detector.py --folder dataset --all --orb --db duplicate_detection.db
 ```
 
 ---
@@ -167,20 +204,12 @@ python unified_detector.py --folder dataset --all --db duplicate_detection.db
 Execute the comprehensive unit and integration test suites:
 
 ```bash
-# Run Module 2 unit tests (10 tests)
-python -m unittest test_image_detection.py
-
-# Run Module 4 document classification unit tests (4 tests)
-python -m unittest tests/test_document_classification.py
-
-# Run synthetic end-to-end integration tests (18 tests)
-python -m unittest tests/test_integration.py
-
-# Run all 32 tests in one command
+# Run all tests in the repository (63 tests)
 python -m unittest discover -s tests -p "test_*.py"
+python -m unittest test_image_detection.py
 ```
 
-All 32 tests pass completely on synthetic datasets without external downloads.
+All 63 tests pass completely in under 12 seconds on synthetic datasets without external network downloads.
 
 ---
 

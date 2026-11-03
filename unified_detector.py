@@ -20,7 +20,7 @@ import sys
 import time
 from itertools import combinations
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 # Module 1: Exact SHA-256 hashing (preserved from teammate's main.py)
 from main import calculate_hash
@@ -63,6 +63,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SIMILARITY_THRESHOLD = 80.0
 
+# Hash caches to avoid recomputing hashes on unchanged files (filepath, size, mtime)
+_SHA256_CACHE: Dict[Tuple[str, int, float], str] = {}
+_IMAGE_HASH_CACHE: Dict[Tuple[str, int, float], Tuple[object, object]] = {}
+
+
 
 class UnifiedDetector:
     """
@@ -75,13 +80,18 @@ class UnifiedDetector:
         target_folder: Union[str, Path],
         threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
         enable_ocr: bool = False,
+        enable_orb: bool = False,
+        use_cache: bool = True,
         report_output: Union[str, Path] = COMBINED_REPORT_DEFAULT,
     ):
         self.target_folder = Path(target_folder).resolve()
         self.threshold = float(threshold)
         self.enable_ocr = enable_ocr
+        self.enable_orb = enable_orb
+        self.use_cache = use_cache
         self.report_output = Path(report_output)
         self.result_manager = ResultManager()
+        self.failed_files: List[Tuple[str, str]] = []
 
     def run_exact_detection(self, inventory: ScanInventory) -> int:
         """
@@ -94,12 +104,21 @@ class UnifiedDetector:
 
         for file_rec in target_files:
             try:
-                f_hash = calculate_hash(file_rec.path)
+                st = file_rec.path.stat()
+                cache_key = (str(file_rec.path), st.st_size, st.st_mtime)
+                if self.use_cache and cache_key in _SHA256_CACHE:
+                    f_hash = _SHA256_CACHE[cache_key]
+                else:
+                    f_hash = calculate_hash(file_rec.path)
+                    if self.use_cache:
+                        _SHA256_CACHE[cache_key] = f_hash
+
                 if f_hash not in hash_groups:
                     hash_groups[f_hash] = []
                 hash_groups[f_hash].append(file_rec)
             except Exception as e:
                 logger.warning("Could not calculate SHA-256 for '%s': %s", file_rec.path, e)
+                self.failed_files.append((str(file_rec.path), str(e)))
 
         added_pairs = 0
         for f_hash, group in hash_groups.items():
@@ -137,11 +156,19 @@ class UnifiedDetector:
         image_hashes = []
         for img_rec in images:
             try:
-                p = compute_phash(img_rec.path)
-                d = compute_dhash(img_rec.path)
+                st = img_rec.path.stat()
+                cache_key = (str(img_rec.path), st.st_size, st.st_mtime)
+                if self.use_cache and cache_key in _IMAGE_HASH_CACHE:
+                    p, d = _IMAGE_HASH_CACHE[cache_key]
+                else:
+                    p = compute_phash(img_rec.path)
+                    d = compute_dhash(img_rec.path)
+                    if self.use_cache:
+                        _IMAGE_HASH_CACHE[cache_key] = (p, d)
                 image_hashes.append((img_rec, p, d))
             except Exception as e:
                 logger.warning("Failed to generate image hashes for '%s': %s", img_rec.file_name, e)
+                self.failed_files.append((str(img_rec.path), str(e)))
 
         # 2. Pairwise comparison using itertools.combinations (eliminates self and reverse pairs)
         added_pairs = 0
@@ -152,10 +179,21 @@ class UnifiedDetector:
             p_sim = calculate_similarity(p_dist, total_bits=64)
             d_sim = calculate_similarity(d_dist, total_bits=64)
 
-            # Categorize duplicate
+            # Categorize duplicate using pHash and dHash
             category, is_dup = categorize_duplicate(
                 p_sim, d_sim, p_dist, d_dist, threshold=self.threshold
             )
+
+            # Optional geometric verification with ORB + RANSAC if enabled
+            if not is_dup and self.enable_orb:
+                try:
+                    from orb_detection import match_and_verify
+                    orb_res = match_and_verify(img1.path, img2.path)
+                    if orb_res.is_match:
+                        category = "Near Duplicate"
+                        is_dup = True
+                except Exception as orb_err:
+                    logger.debug("ORB verification skipped: %s", orb_err)
 
             if is_dup:
                 dup_type = "exact_duplicate" if (p_dist == 0 and d_dist == 0) else "near_duplicate_image"
@@ -305,6 +343,7 @@ class UnifiedDetector:
             duration=duration,
             report_path=out_csv,
             classified_count=len(classification_results),
+            failed_files_count=len(self.failed_files) + len(inventory.skipped_files),
         )
 
         return records, summary, classification_results
@@ -390,6 +429,7 @@ def main():
         target_folder=args.folder,
         threshold=args.threshold,
         enable_ocr=args.ocr,
+        enable_orb=args.orb,
         report_output=args.output,
     )
 

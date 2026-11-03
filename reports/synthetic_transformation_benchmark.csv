@@ -1,0 +1,9 @@
+test_category,expected_behavior,test_pairs,accuracy,precision,recall,f1_score,false_positives,false_negatives,avg_latency_ms
+Exact file copy,Duplicate,25,1.0,1.0,1.0,1.0,0,0,59.47
+Re-encoded image (PNG),Duplicate,25,1.0,1.0,1.0,1.0,0,0,1076.59
+Resized image (50%),Duplicate,25,1.0,1.0,1.0,1.0,0,0,147.37
+JPEG compressed (Q=25),Duplicate,25,1.0,1.0,1.0,1.0,0,0,136.49
+Brightness changed (+25%),Duplicate,25,1.0,1.0,1.0,1.0,0,0,159.76
+Rotated image (15 deg),Duplicate,25,1.0,1.0,1.0,1.0,0,0,327.12
+Cropped image (50% area),Duplicate,25,1.0,1.0,1.0,1.0,0,0,222.58
+Unrelated image,Non-duplicate,25,1.0,1.0,1.0,1.0,0,0,552.37

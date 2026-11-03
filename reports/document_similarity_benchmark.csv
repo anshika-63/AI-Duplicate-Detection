@@ -1,0 +1,10 @@
+benchmark_case,doc1_name,doc2_name,similarity_score,predicted_category,predicted_duplicate,ground_truth_duplicate,status,doc1_word_count,doc2_word_count,doc1_quality,doc2_quality
+Exact Copy (Same Format TXT),base.txt,exact_copy.txt,100.0,exact_duplicate,True,True,PASS,70,70,1.0,1.0
+Cross-Format Identical (TXT vs DOCX),base.txt,cross_format.docx,100.0,cross_format_document,True,True,PASS,70,70,1.0,1.0
+Minor Modification (1 Token Changed),base.txt,minor_mod.txt,97.47,near_duplicate_document,True,True,PASS,70,70,1.0,1.0
+Paragraph Reordering (Shuffled),base.txt,reordered.txt,100.0,exact_duplicate,True,True,PASS,70,70,1.0,1.0
+Moderate Modification (1 Sentence Paraphrased),base.txt,moderate_mod.txt,92.59,near_duplicate_document,True,True,PASS,70,70,1.0,1.0
+Borderline Review (2 Sentences Rewritten),base.txt,borderline_possible.txt,69.53,possible_duplicate,False,False,PASS,70,65,1.0,1.0
+Heavy Modification (Majority Replaced),base.txt,heavy_mod.txt,29.21,non_duplicate,False,False,PASS,70,49,1.0,1.0
+Unrelated Domain (NLP vs Quantum Physics),base.txt,unrelated_physics.txt,0.88,non_duplicate,False,False,PASS,70,32,1.0,1.0
+Empty Document vs Base,base.txt,empty.txt,0.0,non_duplicate,False,False,PASS,70,0,1.0,0.0

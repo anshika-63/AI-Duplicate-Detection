@@ -236,3 +236,83 @@ class DatabaseManager:
             scan_id = cursor.lastrowid
             conn.commit()
             return scan_id
+
+    def get_database_stats(self) -> Dict[str, int]:
+        """Returns aggregate row counts across all managed tables."""
+        stats = {}
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            for table in ("files", "detection_results", "classification_results", "scan_history"):
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                stats[table] = cursor.fetchone()[0]
+        finally:
+            conn.close()
+        return stats
+
+    def get_detection_results(
+        self,
+        min_similarity: float = 0.0,
+        duplicate_type: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Union[str, float, int]]]:
+        """Queries detected duplicate candidate pairs with joined file details."""
+        query = """
+            SELECT 
+                r.id, fa.file_path AS file_path_1, fa.filename AS file_name_1,
+                fb.file_path AS file_path_2, fb.filename AS file_name_2,
+                r.duplicate_type, r.similarity_score, r.detection_algorithm,
+                r.detection_details, r.detected_at
+            FROM detection_results r
+            JOIN files fa ON r.file_a_id = fa.id
+            JOIN files fb ON r.file_b_id = fb.id
+            WHERE r.similarity_score >= ?
+        """
+        params = [min_similarity]
+        if duplicate_type and duplicate_type != "All":
+            query += " AND r.duplicate_type = ?"
+            params.append(duplicate_type)
+        query += " ORDER BY r.similarity_score DESC, r.detected_at DESC LIMIT ?"
+        params.append(limit)
+
+        results = []
+        conn = self._get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            for row in cursor.fetchall():
+                results.append(dict(row))
+        finally:
+            conn.close()
+        return results
+
+    def get_scan_history(self, limit: int = 50) -> List[Dict[str, Union[str, int]]]:
+        """Queries historical scan execution audit logs."""
+        conn = self._get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM scan_history ORDER BY scan_timestamp DESC LIMIT ?",
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_classification_results(self, limit: int = 100) -> List[Dict[str, Union[str, float, int]]]:
+        """Queries historical document classification predictions."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT c.id, f.file_path, f.filename, c.predicted_class, c.confidence, c.model_name, c.classified_at
+                FROM classification_results c
+                JOIN files f ON c.file_id = f.id
+                ORDER BY c.classified_at DESC LIMIT ?
+                """,
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]

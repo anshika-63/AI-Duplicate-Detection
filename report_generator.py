@@ -52,6 +52,8 @@ class ExecutionSummary:
     scan_duration_seconds: float
     output_report_file: str
     classified_documents: int = 0
+    throughput_fps: float = 0.0
+    failed_files_count: int = 0
 
     def print_summary(self):
         """Prints formatted summary to console."""
@@ -68,6 +70,10 @@ class ExecutionSummary:
             print(f"Classified documents (16-class):   {self.classified_documents}")
         print(f"Total detected duplicate pairs:    {self.total_detected_pairs}")
         print(f"Scan duration:                     {self.scan_duration_seconds:.2f}s")
+        if self.throughput_fps > 0:
+            print(f"Processing throughput:             {self.throughput_fps:.1f} files/sec")
+        if self.failed_files_count > 0:
+            print(f"Skipped / unreadable files:        {self.failed_files_count}")
         print(f"Combined report generated:         {self.output_report_file}")
         print("=" * 50 + "\n")
 
@@ -112,6 +118,7 @@ def calculate_execution_summary(
     duration: float,
     report_path: Union[str, Path] = COMBINED_REPORT_DEFAULT,
     classified_count: int = 0,
+    failed_files_count: int = 0,
 ) -> ExecutionSummary:
     """
     Aggregates metrics directly from detected duplicate records.
@@ -135,6 +142,8 @@ def calculate_execution_summary(
         elif cat == "possible_duplicate":
             possible_count += 1
 
+    fps = round(total_scanned / max(duration, 0.001), 1)
+
     return ExecutionSummary(
         total_files_scanned=total_scanned,
         exact_duplicate_pairs=exact_count,
@@ -146,5 +155,7 @@ def calculate_execution_summary(
         scan_duration_seconds=duration,
         output_report_file=str(report_path),
         classified_documents=classified_count,
+        throughput_fps=fps,
+        failed_files_count=failed_files_count,
     )
 

@@ -121,5 +121,34 @@ class TestDocumentSimilarityRegression(unittest.TestCase):
         self.assertIn("ai duplicate detection", normalized)
 
 
+    def test_07_metadata_and_quality_metrics(self):
+        """Verify extraction metadata, word counts, and quality scoring."""
+        from document_detection import extract_document_text_with_metadata
+        meta = extract_document_text_with_metadata(self.path_base)
+        self.assertGreater(meta.char_count, 100)
+        self.assertGreater(meta.word_count, 20)
+        self.assertGreaterEqual(meta.quality_score, 0.8)
+        self.assertFalse(meta.is_scanned)
+
+    def test_08_cross_format_docx_txt(self):
+        """Verify cross-format document comparison recognizes identical content across extensions."""
+        from tools.benchmark_documents import create_minimal_docx
+        docx_path = self.dir_path / "base_copy.docx"
+        create_minimal_docx(self.doc_base, docx_path)
+
+        res = compare_two_documents(self.path_base, docx_path)
+        self.assertEqual(res.similarity_score, 100.0)
+        self.assertEqual(res.duplicate_type, "cross_format_document")
+        self.assertTrue(res.is_duplicate)
+
+    def test_09_paragraph_reordering_invariance(self):
+        """Verify TF-IDF bag-of-words properties maintain 100% similarity under paragraph permutation."""
+        p_reordered = self.doc_base.split(". ")
+        reordered_str = ". ".join(reversed(p_reordered))
+        sim = calculate_tfidf_similarity(self.doc_base, reordered_str)
+        self.assertEqual(sim, 100.0)
+
+
 if __name__ == "__main__":
     unittest.main()
+

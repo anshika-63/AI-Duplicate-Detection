@@ -215,27 +215,168 @@ def extract_text_from_docx(file_path: Union[str, Path]) -> str:
         return ""
 
 
-def extract_text_with_ocr(file_path: Union[str, Path]) -> str:
+def extract_text_with_ocr(target: Union[str, Path, object]) -> str:
     """
-    Extracts text using OCR (Tesseract) for scanned documents or images.
+    Extracts text using OCR (Tesseract) for scanned documents, images, or PIL Images.
     Gracefully logs and returns empty string if Tesseract is not installed.
     """
-    path = Path(file_path)
     try:
         import pytesseract
         from PIL import Image
 
-        with Image.open(path) as img:
-            text = pytesseract.image_to_string(img)
-            return text
+        if isinstance(target, (str, Path)):
+            path = Path(target)
+            with Image.open(path) as img:
+                return pytesseract.image_to_string(img)
+        elif hasattr(target, "convert"):
+            # Target is already a PIL Image
+            return pytesseract.image_to_string(target)
+        else:
+            return ""
     except ImportError:
+        target_name = getattr(target, "name", str(target))
         logger.info(
-            "OCR skipped for '%s': 'pytesseract' is not installed.", path.name
+            "OCR skipped for '%s': 'pytesseract' is not installed.", target_name
         )
         return ""
     except Exception as e:
-        logger.warning("OCR processing failed for '%s': %s", path.name, e)
+        target_name = getattr(target, "name", str(target))
+        logger.warning("OCR processing failed for '%s': %s", target_name, e)
         return ""
+
+
+@dataclass
+class TextExtractionResult:
+    """Stores text extraction outputs alongside data quality metrics."""
+    text: str
+    char_count: int
+    word_count: int
+    line_count: int
+    whitespace_ratio: float
+    alphanumeric_ratio: float
+    is_scanned: bool = False
+    ocr_applied: bool = False
+    quality_score: float = 1.0
+
+
+def compute_extraction_quality(
+    text: str,
+    is_scanned: bool = False,
+    ocr_applied: bool = False,
+) -> TextExtractionResult:
+    """Calculates text health and quality indicators."""
+    total_chars = len(text)
+    if total_chars == 0:
+        return TextExtractionResult(
+            text="",
+            char_count=0,
+            word_count=0,
+            line_count=0,
+            whitespace_ratio=0.0,
+            alphanumeric_ratio=0.0,
+            is_scanned=is_scanned,
+            ocr_applied=ocr_applied,
+            quality_score=0.0,
+        )
+
+    words = text.split()
+    word_count = len(words)
+    lines = [line for line in text.splitlines() if line.strip()]
+    line_count = len(lines)
+
+    whitespace_chars = sum(1 for c in text if c.isspace())
+    alphanumeric_chars = sum(1 for c in text if c.isalnum())
+
+    ws_ratio = round(whitespace_chars / total_chars, 4)
+    alnum_ratio = round(alphanumeric_chars / total_chars, 4)
+
+    # Heuristic quality score: penalize extreme whitespace or non-alphanumeric noise
+    score = 1.0
+    if total_chars < 30:
+        score *= 0.5
+    if alnum_ratio < 0.4:
+        score *= (alnum_ratio / 0.4)
+    if ws_ratio > 0.6:
+        score *= (1.0 - (ws_ratio - 0.6))
+    score = max(0.0, min(1.0, round(score, 3)))
+
+    return TextExtractionResult(
+        text=text,
+        char_count=total_chars,
+        word_count=word_count,
+        line_count=line_count,
+        whitespace_ratio=ws_ratio,
+        alphanumeric_ratio=alnum_ratio,
+        is_scanned=is_scanned,
+        ocr_applied=ocr_applied,
+        quality_score=score,
+    )
+
+
+def extract_document_text_with_metadata(
+    file_path: Union[str, Path],
+    enable_ocr: bool = False,
+    use_cache: bool = True,
+) -> TextExtractionResult:
+    """
+    Extracts text from a document and returns detailed quality metrics.
+    Automatically detects scanned PDFs (< 20 chars embedded text) and triggers OCR if enabled.
+    """
+    path = Path(file_path).resolve()
+    cache_key = str(path)
+
+    if use_cache and cache_key in _DOCUMENT_TEXT_CACHE:
+        cached_text = _DOCUMENT_TEXT_CACHE[cache_key]
+        return compute_extraction_quality(cached_text)
+
+    ext = path.suffix.lower()
+    text = ""
+    is_scanned = False
+    ocr_applied = False
+
+    if ext == ".txt":
+        text = extract_text_from_txt(path)
+    elif ext == ".pdf":
+        text = extract_text_from_pdf(path)
+        # Scanned PDF check: embedded text is empty or fewer than 20 characters
+        if len(text.strip()) < 20:
+            is_scanned = True
+            if enable_ocr:
+                # Render PDF pages to images and execute OCR
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(path) as pdf:
+                        ocr_pages = []
+                        for idx, page in enumerate(pdf.pages):
+                            try:
+                                page_img = page.to_image(resolution=200).original
+                                p_text = extract_text_with_ocr(page_img)
+                                if p_text.strip():
+                                    ocr_pages.append(p_text.strip())
+                            except Exception as render_err:
+                                logger.debug("Page %d rendering for OCR failed: %s", idx, render_err)
+                        if ocr_pages:
+                            text = "\n".join(ocr_pages)
+                            ocr_applied = True
+                except Exception as pdf_ocr_err:
+                    logger.debug("PDF page OCR pipeline failed: %s", pdf_ocr_err)
+    elif ext == ".docx":
+        text = extract_text_from_docx(path)
+    elif ext in OCR_IMAGE_EXTENSIONS and enable_ocr:
+        is_scanned = True
+        text = extract_text_with_ocr(path)
+        ocr_applied = bool(text.strip())
+    else:
+        logger.debug("Unsupported document format for text extraction: %s", ext)
+
+    if use_cache:
+        _DOCUMENT_TEXT_CACHE[cache_key] = text
+
+    return compute_extraction_quality(
+        text=text,
+        is_scanned=is_scanned,
+        ocr_applied=ocr_applied,
+    )
 
 
 def extract_document_text(
@@ -244,7 +385,7 @@ def extract_document_text(
     use_cache: bool = True,
 ) -> str:
     """
-    Extracts text from a document based on its file extension.
+    Extracts plain text from a document based on its file extension.
     Uses memory cache to prevent redundant reads.
 
     Args:
@@ -255,33 +396,12 @@ def extract_document_text(
     Returns:
         Extracted plain text.
     """
-    path = Path(file_path).resolve()
-    cache_key = str(path)
-
-    if use_cache and cache_key in _DOCUMENT_TEXT_CACHE:
-        return _DOCUMENT_TEXT_CACHE[cache_key]
-
-    ext = path.suffix.lower()
-    text = ""
-
-    if ext == ".txt":
-        text = extract_text_from_txt(path)
-    elif ext == ".pdf":
-        text = extract_text_from_pdf(path)
-        # If PDF has no embedded text and OCR is enabled, attempt OCR
-        if not text.strip() and enable_ocr:
-            text = extract_text_with_ocr(path)
-    elif ext == ".docx":
-        text = extract_text_from_docx(path)
-    elif ext in OCR_IMAGE_EXTENSIONS and enable_ocr:
-        text = extract_text_with_ocr(path)
-    else:
-        logger.debug("Unsupported document format for text extraction: %s", ext)
-
-    if use_cache:
-        _DOCUMENT_TEXT_CACHE[cache_key] = text
-
-    return text
+    result = extract_document_text_with_metadata(
+        file_path=file_path,
+        enable_ocr=enable_ocr,
+        use_cache=use_cache,
+    )
+    return result.text
 
 
 def clear_document_cache() -> None:
@@ -292,6 +412,7 @@ def clear_document_cache() -> None:
 # ==========================================
 # 3. DOCUMENT COMPARISON AND SCANNERS
 # ==========================================
+
 
 @dataclass
 class DocumentComparisonResult:
