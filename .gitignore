@@ -2,4 +2,12 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
-
+*.db
+logs/
+cache/
+checkpoints/
+temp_upload/
+*.zip
+*.tar.gz
+.venv/
+venv/

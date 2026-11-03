@@ -1,0 +1,3 @@
+model_name,architecture,val_accuracy,test_accuracy,weighted_f1,notes
+Baseline 1,ResNet18 Features + Logistic Regression,0.5833,0.7984,0.797,Linear baseline with L2 regularization
+Baseline 2 (Best),ResNet18 Features + Deep MLP (Dropout & BatchNorm),0.6508,0.874,0.8737,Non-linear multi-layer representation with AdamW early stopping

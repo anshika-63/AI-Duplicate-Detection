@@ -1,0 +1,17 @@
+class_id,class_name,train_count,val_count,test_count
+0,letter,425,75,62
+1,form,425,75,62
+2,email,425,75,62
+3,handwritten,425,75,62
+4,advertisement,425,75,62
+5,scientific report,425,75,62
+6,scientific publication,425,75,62
+7,specification,425,75,62
+8,file folder,425,75,62
+9,news article,425,75,62
+10,budget,425,75,62
+11,invoice,425,75,62
+12,presentation,425,75,62
+13,questionnaire,425,75,62
+14,resume,425,75,62
+15,memo,425,75,62
