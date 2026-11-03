@@ -2,14 +2,18 @@
 Regression and Diagnostic Test Suite for Document Classification Module.
 T243 – AI-Based Duplicate Document & Near-Duplicate Image Detection
 
-Phase 3 Regression Tests:
+Phase 3 / Stage 1 Regression Tests:
 1. Determinism across 5 repeated inferences.
 2. Checkpoint metadata and label mapping consistency.
 3. Model evaluation mode (Dropout inactive, deterministic output).
 4. Synthetic DOCX invoice classification with multimodal text-prior fusion.
 5. Genuine RVL-CDIP invoice image classification.
 6. Genuine RVL-CDIP email image classification.
-7. Top-3 alternative candidate predictions and confidence bounds.
+7. Top-5 alternative candidate predictions and confidence bounds.
+8. Missing file raises FileNotFoundError.
+9. Corrupted file raises ValueError.
+10. Unsupported file extension raises ValueError.
+11. Extreme image dimensions handled gracefully by resize transform.
 """
 
 import io
@@ -73,7 +77,20 @@ class TestDocumentClassificationRegression(unittest.TestCase):
             z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>')
             z.writestr("word/document.xml", sample_xml)
 
-        # 2. Existing genuine RVL-CDIP invoice and email samples cached locally
+        # 2. Corrupted file
+        cls.corrupted_path = cls.dir_path / "corrupted.png"
+        cls.corrupted_path.write_bytes(b"\x89PNG\r\n\x1a\nBROKEN_GARBAGE_BYTES")
+
+        # 3. Unsupported file
+        cls.unsupported_path = cls.dir_path / "audio.mp3"
+        cls.unsupported_path.write_text("ID3FakeAudioData")
+
+        # 4. Extreme dimensions image (narrow vertical 50x800 banner)
+        cls.extreme_dim_path = cls.dir_path / "extreme_banner.png"
+        img_extreme = Image.new("RGB", (50, 800), color=(200, 200, 200))
+        img_extreme.save(cls.extreme_dim_path)
+
+        # 5. Existing genuine RVL-CDIP invoice and email samples cached locally
         cls.rvl_invoice_path = Path("cache/rvlcdip_sample_class_11_invoice.png")
         cls.rvl_email_path = Path("cache/rvlcdip_sample_class_2_email.png")
 
@@ -131,9 +148,9 @@ class TestDocumentClassificationRegression(unittest.TestCase):
             self.assertGreaterEqual(res.confidence, 0.85)
 
     def test_07_top_alternatives_structure(self):
-        """Top-3 alternative predictions must be descending and have valid confidence bounds."""
-        res = self.classifier.classify_document(self.docx_path)
-        self.assertEqual(len(res.alternative_predictions), 3)
+        """Top-5 alternative predictions must be descending and have valid confidence bounds."""
+        res = self.classifier.classify_document(self.docx_path, top_k=5)
+        self.assertEqual(len(res.alternative_predictions), 5)
 
         prev_conf = 1.0
         for cat, conf in res.alternative_predictions:
@@ -142,6 +159,29 @@ class TestDocumentClassificationRegression(unittest.TestCase):
             self.assertLessEqual(conf, 1.0)
             self.assertLessEqual(conf, prev_conf)
             prev_conf = conf
+
+    def test_08_missing_file_raises_not_found(self):
+        """Missing file must raise FileNotFoundError."""
+        missing = self.dir_path / "non_existent_file.png"
+        with self.assertRaises(FileNotFoundError):
+            self.classifier.classify_document(missing)
+
+    def test_09_corrupted_file_raises_value_error(self):
+        """Corrupted image bytes must raise ValueError."""
+        with self.assertRaises(ValueError):
+            self.classifier.classify_document(self.corrupted_path)
+
+    def test_10_unsupported_format_raises_value_error(self):
+        """Unsupported format must raise ValueError."""
+        with self.assertRaises(ValueError):
+            self.classifier.classify_document(self.unsupported_path)
+
+    def test_11_extreme_dimensions_handled(self):
+        """Extreme non-square dimensions (50x800) must resize to (224, 224) without crashing."""
+        res = self.classifier.classify_document(self.extreme_dim_path)
+        self.assertIn(res.predicted_category, CLASS_NAMES)
+        self.assertGreaterEqual(res.confidence, 0.0)
+        self.assertLessEqual(res.confidence, 1.0)
 
 
 if __name__ == "__main__":

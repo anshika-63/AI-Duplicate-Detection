@@ -108,21 +108,49 @@ class ClassificationResult:
         }
 
 
+SUPPORTED_CLASSIFICATION_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".txt",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".tiff",
+    ".tif",
+    ".bmp",
+    ".webp",
+}
+
+
 def convert_document_to_image(file_path: Union[str, Path]) -> Image.Image:
     """
     Renders or loads any supported document into an RGB Pillow Image.
     Supports PDF (first page render), TIFF, PNG, JPG, BMP, WEBP, DOCX, TXT.
+
+    Raises:
+        FileNotFoundError: If the document file does not exist.
+        ValueError: If the file format is unsupported or the file is corrupted.
     """
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
     ext = path.suffix.lower()
+    if ext not in SUPPORTED_CLASSIFICATION_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported document format '{ext}' for classification. "
+            f"Supported formats: {sorted(SUPPORTED_CLASSIFICATION_EXTENSIONS)}"
+        )
 
     # Case 1: Image formats
     if ext in {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff", ".tif"}:
-        with Image.open(path) as img:
-            return img.convert("RGB")
+        try:
+            with Image.open(path) as img:
+                loaded = img.convert("RGB")
+                loaded.load()
+                return loaded
+        except Exception as e:
+            raise ValueError(f"Corrupted or unreadable image file '{path.name}': {e}") from e
 
     # Case 2: PDF files - render first page
     if ext == ".pdf":
@@ -133,21 +161,20 @@ def convert_document_to_image(file_path: Union[str, Path]) -> Image.Image:
                     pil_img = pdf.pages[0].to_image(resolution=150).original
                     return pil_img.convert("RGB")
         except Exception as e:
-            logger.debug("pdfplumber page render failed: %s", e)
+            logger.debug("pdfplumber page render failed for %s: %s", path.name, e)
 
         # Fallback text representation to synthetic image if rendering is unavailable
         from document_detection import extract_text_from_pdf
-        text = extract_text_from_pdf(path)
-        return create_text_preview_image(text)
+        text_content = extract_text_from_pdf(path)
+        return create_text_preview_image(text_content)
 
     # Case 3: DOCX / TXT files
     if ext in {".docx", ".txt"}:
         from document_detection import extract_document_text
-        text = extract_document_text(path, use_cache=True)
-        return create_text_preview_image(text)
+        text_content = extract_document_text(path, use_cache=True)
+        return create_text_preview_image(text_content)
 
-    # Default fallback: plain canvas
-    return Image.new("RGB", (224, 224), color=(240, 240, 240))
+    raise ValueError(f"Unsupported document format '{ext}' for classification.")
 
 
 TEXT_CLASS_KEYWORDS = {
@@ -283,7 +310,7 @@ class DocumentClassifier:
             self.head.load_state_dict(ckpt)
             self.is_trained = True
 
-    def classify_document(self, file_path: Union[str, Path]) -> ClassificationResult:
+    def classify_document(self, file_path: Union[str, Path], top_k: int = 3) -> ClassificationResult:
         """
         Classifies an input document (image, PDF, DOCX, TXT) into one of 16 categories.
         """
@@ -317,10 +344,10 @@ class DocumentClassifier:
         pred_category = self.class_names[top_idx]
         confidence = float(probs[top_idx])
 
-        # Top alternatives (ranks 2, 3, 4)
+        # Top alternatives (configurable top-k, default top 5)
         alternatives = [
             (self.class_names[idx], float(probs[idx]))
-            for idx in top_indices[1:4]
+            for idx in top_indices[1:1 + top_k]
         ]
 
         elapsed_ms = (time.time() - start_time) * 1000.0

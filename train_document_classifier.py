@@ -524,17 +524,143 @@ def train_and_evaluate(
     logger.info("Saved confusion matrix plot to '%s'.", cm_file)
 
 
+
+def evaluate_model(
+    checkpoint_path: Path = Path("checkpoints/best_document_classifier.pth"),
+    cache_dir: Path = Path("cache"),
+    reports_dir: Path = Path("reports"),
+    dataset_dir: Path = Path(DEFAULT_DATASET_DIR),
+) -> Dict[str, float]:
+    """
+    Evaluates saved model checkpoint on untouched official RVL-CDIP Test Set (992 samples).
+    Computes Accuracy, Macro/Weighted F1, Precision, Recall, Confusion Matrix, and CSV reports.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Running Official Evaluation using device: %s", device)
+
+    # 1. Load features
+    _, _, X_test, y_test = get_or_create_features(dataset_dir, cache_dir)
+    logger.info("Loaded test set with %d samples across %d classes.", len(y_test), len(CLASS_NAMES))
+
+    # 2. Load model
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found at '{checkpoint_path}'.")
+
+    model = DeepClassificationHead(in_features=512, num_classes=16).to(device)
+    ckpt = torch.load(checkpoint_path, map_location=device)
+    state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+    model.load_state_dict(state_dict)
+    model.eval()
+
+    test_tensor = torch.tensor(X_test, dtype=torch.float32).to(device)
+    with torch.no_grad():
+        logits = model(test_tensor)
+        probs = torch.softmax(logits, dim=1).cpu().numpy()
+        test_preds = np.argmax(probs, axis=1)
+
+    test_acc = float(np.mean(test_preds == y_test))
+    macro_prec = float(precision_score(y_test, test_preds, average="macro", zero_division=0))
+    macro_rec = float(recall_score(y_test, test_preds, average="macro", zero_division=0))
+    macro_f1 = float(f1_score(y_test, test_preds, average="macro", zero_division=0))
+    weighted_f1 = float(f1_score(y_test, test_preds, average="weighted", zero_division=0))
+
+    logger.info("Official Test Performance:")
+    logger.info(" - Test Accuracy:     %.4f (%.2f%%)", test_acc, test_acc * 100)
+    logger.info(" - Macro Precision:   %.4f", macro_prec)
+    logger.info(" - Macro Recall:      %.4f", macro_rec)
+    logger.info(" - Macro F1-Score:    %.4f", macro_f1)
+    logger.info(" - Weighted F1-Score: %.4f", weighted_f1)
+
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # Classification Report
+    clf_report = classification_report(y_test, test_preds, target_names=CLASS_NAMES, output_dict=True)
+    rep_csv = reports_dir / "document_classification_report.csv"
+    with open(rep_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["class_name", "precision", "recall", "f1_score", "support"])
+        for cname in CLASS_NAMES:
+            c_dict = clf_report[cname]
+            writer.writerow([
+                cname,
+                round(c_dict["precision"], 4),
+                round(c_dict["recall"], 4),
+                round(c_dict["f1-score"], 4),
+                int(c_dict["support"]),
+            ])
+        writer.writerow([
+            "macro avg",
+            round(clf_report["macro avg"]["precision"], 4),
+            round(clf_report["macro avg"]["recall"], 4),
+            round(clf_report["macro avg"]["f1-score"], 4),
+            len(y_test),
+        ])
+        writer.writerow([
+            "weighted avg",
+            round(clf_report["weighted avg"]["precision"], 4),
+            round(clf_report["weighted avg"]["recall"], 4),
+            round(clf_report["weighted avg"]["f1-score"], 4),
+            len(y_test),
+        ])
+    logger.info("Saved per-class classification report to '%s'.", rep_csv)
+
+    # Predictions CSV
+    pred_csv = reports_dir / "document_classification_predictions.csv"
+    with open(pred_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["sample_id", "true_class", "predicted_class", "confidence", "is_correct"])
+        for idx in range(min(len(y_test), 200)):
+            p_class = CLASS_NAMES[test_preds[idx]]
+            t_class = CLASS_NAMES[y_test[idx]]
+            conf = round(float(probs[idx][test_preds[idx]]), 4)
+            writer.writerow([idx, t_class, p_class, conf, p_class == t_class])
+    logger.info("Saved sample predictions to '%s'.", pred_csv)
+
+    # Confusion Matrix
+    cm = confusion_matrix(y_test, test_preds)
+    plt.figure(figsize=(14, 12))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=CLASS_NAMES,
+        yticklabels=CLASS_NAMES,
+    )
+    plt.xlabel("Predicted Document Class")
+    plt.ylabel("True Document Class")
+    plt.title("RVL-CDIP 16-Class Confusion Matrix (Test Set, N=992)")
+    plt.xticks(rotation=45, ha="right")
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+    cm_file = reports_dir / "confusion_matrix.png"
+    plt.savefig(cm_file, dpi=150)
+    plt.close()
+    logger.info("Saved confusion matrix to '%s'.", cm_file)
+
+    return {
+        "test_accuracy": test_acc,
+        "macro_precision": macro_prec,
+        "macro_recall": macro_rec,
+        "macro_f1": macro_f1,
+        "weighted_f1": weighted_f1,
+    }
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="RVL-CDIP Document Classifier Trainer")
+    parser = argparse.ArgumentParser(description="RVL-CDIP Document Classifier Trainer & Evaluator")
     parser.add_argument("--dataset_dir", type=str, default=DEFAULT_DATASET_DIR, help="Path to Parquet files")
     parser.add_argument("--epochs", type=int, default=25, help="Maximum epochs")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    parser.add_argument("--eval_only", action="store_true", help="Run evaluation only on official test partition")
     args = parser.parse_args()
 
-    train_and_evaluate(
-        dataset_dir=args.dataset_dir,
-        max_epochs=args.epochs,
-        batch_size=args.batch_size,
-        learning_rate=args.lr,
-    )
+    if args.eval_only:
+        evaluate_model(dataset_dir=Path(args.dataset_dir))
+    else:
+        train_and_evaluate(
+            dataset_dir=args.dataset_dir,
+            max_epochs=args.epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.lr,
+        )

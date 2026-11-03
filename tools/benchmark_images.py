@@ -242,6 +242,114 @@ def evaluate_synthetic_crops(
     return rows
 
 
+
+def evaluate_comprehensive_transformations(
+    inria_root: Path, sample_limit: int = 25
+) -> List[Dict[str, Any]]:
+    """
+    Evaluates multi-modal pipeline against the 8 core transformation categories:
+    1. Exact file copy (SHA-256)
+    2. Re-encoded image (PNG conversion)
+    3. Resized image (50% scale)
+    4. JPEG compressed image (Q=25)
+    5. Brightness changed (+25%)
+    6. Rotated image (15 deg)
+    7. Cropped image (50% center crop)
+    8. Unrelated similar-background image (Negative control)
+
+    Computes: Precision, Recall, F1, Accuracy, FP, FN, Avg Time (ms).
+    """
+    orig_dir = inria_root / "orignal"
+    if not orig_dir.exists():
+        return []
+
+    from PIL import ImageEnhance
+    import io, time
+    from image_detection import compare_images
+
+    orig_files = sorted(list(orig_dir.glob("*.jpg")))[:sample_limit]
+    if len(orig_files) < 2:
+        return []
+
+    results = []
+
+    # Category definitions: (name, transform_func, is_duplicate_ground_truth)
+    categories = [
+        ("Exact file copy", lambda img, p: p, True),
+        ("Re-encoded image (PNG)", lambda img, p: None, True),  # Special handling
+        ("Resized image (50%)", lambda img, p: img.resize((max(1, img.width // 2), max(1, img.height // 2))), True),
+        ("JPEG compressed (Q=25)", lambda img, p: None, True),  # Special handling
+        ("Brightness changed (+25%)", lambda img, p: ImageEnhance.Brightness(img).enhance(1.25), True),
+        ("Rotated image (15 deg)", lambda img, p: img.rotate(15, expand=False), True),
+        ("Cropped image (50% area)", lambda img, p: img.crop((int(img.width * 0.25), int(img.height * 0.25), int(img.width * 0.75), int(img.height * 0.75))), True),
+        ("Unrelated image", lambda img, p: None, False),  # Negative pair
+    ]
+
+    for cat_name, trans_func, is_dup_gt in categories:
+        y_true = []
+        y_pred = []
+        latencies = []
+
+        for i, orig_path in enumerate(orig_files):
+            t0 = time.time()
+            with Image.open(orig_path) as im:
+                orig_img = im.convert("RGB")
+
+            # Create test image or path
+            if cat_name == "Exact file copy":
+                res = compare_images(orig_path, orig_path, enable_orb=True, check_sha256=True)
+            elif cat_name == "Re-encoded image (PNG)":
+                buf = io.BytesIO()
+                orig_img.save(buf, format="PNG")
+                buf.seek(0)
+                png_img = Image.open(buf)
+                res = compare_images(orig_img, png_img, enable_orb=True, check_sha256=False)
+            elif cat_name == "JPEG compressed (Q=25)":
+                buf = io.BytesIO()
+                orig_img.save(buf, format="JPEG", quality=25)
+                buf.seek(0)
+                jpg_img = Image.open(buf)
+                res = compare_images(orig_img, jpg_img, enable_orb=True, check_sha256=False)
+            elif cat_name == "Unrelated image":
+                # Compare with next image in list
+                other_path = orig_files[(i + 1) % len(orig_files)]
+                res = compare_images(orig_path, other_path, enable_orb=True, check_sha256=True)
+            else:
+                mod_img = trans_func(orig_img, orig_path)
+                res = compare_images(orig_img, mod_img, enable_orb=True, check_sha256=False)
+
+            t_elapsed = (time.time() - t0) * 1000.0
+            latencies.append(t_elapsed)
+
+            y_true.append(1 if is_dup_gt else 0)
+            y_pred.append(1 if res.is_duplicate else 0)
+
+        # Metrics for category
+        tp = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 1 and yp == 1)
+        tn = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 0 and yp == 0)
+        fp = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 0 and yp == 1)
+        fn = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 1 and yp == 0)
+
+        prec = float(tp / max(1, (tp + fp))) if (tp + fp) > 0 else 1.0
+        rec = float(tp / max(1, (tp + fn))) if (tp + fn) > 0 else 1.0
+        f1 = float(2 * prec * rec / max(1e-6, (prec + rec))) if (prec + rec) > 0 else 0.0
+        acc = float((tp + tn) / max(1, len(y_true)))
+
+        results.append({
+            "test_category": cat_name,
+            "expected_behavior": "Duplicate" if is_dup_gt else "Non-duplicate",
+            "test_pairs": len(y_true),
+            "accuracy": round(acc, 4),
+            "precision": round(prec, 4),
+            "recall": round(rec, 4),
+            "f1_score": round(f1, 4),
+            "false_positives": fp,
+            "false_negatives": fn,
+            "avg_latency_ms": round(float(np.mean(latencies)), 2),
+        })
+
+    return results
+
 def run_image_benchmarks(
     dataset_root: str = DEFAULT_INRIA_DIR, reports_dir: str = DEFAULT_REPORTS_DIR
 ):
@@ -257,6 +365,17 @@ def run_image_benchmarks(
 
     # 2. Synthetic Crop & Rotation Benchmark
     crop_benchmarks = evaluate_synthetic_crops(inria_path, sample_limit=25)
+    # 3. Comprehensive 8-Category Transformation Benchmark
+    comp_benchmarks = evaluate_comprehensive_transformations(inria_path, sample_limit=25)
+    comp_file = rep_dir / "synthetic_transformation_benchmark.csv"
+    if comp_benchmarks:
+        with open(comp_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(comp_benchmarks[0].keys()))
+            writer.writeheader()
+            for r in comp_benchmarks:
+                writer.writerow(r)
+        logger.info("Saved comprehensive transformation benchmark to '%s'.", comp_file)
+
 
     # Export image_benchmark_results.csv
     bench_file = rep_dir / "image_benchmark_results.csv"

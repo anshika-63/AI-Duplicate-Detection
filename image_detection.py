@@ -226,31 +226,68 @@ def categorize_duplicate(
     return "Non-Duplicate", False
 
 
+
+def get_image_file_sha256(path: Union[str, Path]) -> Optional[str]:
+    """Computes SHA-256 for an existing file on disk in 8KB chunks."""
+    p = Path(path)
+    if not p.is_file():
+        return None
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(p, "rb") as f:
+            while chunk := f.read(8192):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
 def compare_images(
     img1_path: Union[str, Path],
     img2_path: Union[str, Path],
     threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
     hash_size: int = DEFAULT_HASH_SIZE,
+    enable_orb: bool = False,
+    check_sha256: bool = True,
 ) -> ComparisonResult:
     """
-    Compares two image files using pHash and dHash.
+    Compares two image files using SHA-256 (for byte-identical detection),
+    perceptual hashing (pHash + dHash), and optional ORB feature verification.
 
     Args:
         img1_path: Path to first image.
         img2_path: Path to second image.
         threshold: Minimum similarity percentage to consider near-duplicate.
         hash_size: Hash size (default 8).
+        enable_orb: If True, uses ORB RANSAC feature matching when hashes diverge or indicate crop.
+        check_sha256: If True, tests cryptographic byte equality first.
 
     Returns:
         ComparisonResult object.
     """
+    # Priority 1: Byte-identical check via SHA-256
+    if check_sha256:
+        sha1 = get_image_file_sha256(img1_path)
+        sha2 = get_image_file_sha256(img2_path)
+        if sha1 is not None and sha2 is not None and sha1 == sha2:
+            return ComparisonResult(
+                image_path_1=str(img1_path),
+                image_path_2=str(img2_path),
+                phash_distance=0,
+                phash_similarity=100.0,
+                dhash_distance=0,
+                dhash_similarity=100.0,
+                detection_algorithm="SHA-256 (Byte-Identical)",
+                duplicate_category="Exact Duplicate",
+                is_duplicate=True,
+            )
+
     total_bits = hash_size * hash_size
 
-    # Load and hash first image
+    # Priority 2: Perceptual Hashing (pHash + dHash)
     p1 = compute_phash(img1_path, hash_size=hash_size)
     d1 = compute_dhash(img1_path, hash_size=hash_size)
 
-    # Load and hash second image
     p2 = compute_phash(img2_path, hash_size=hash_size)
     d2 = compute_dhash(img2_path, hash_size=hash_size)
 
@@ -266,6 +303,20 @@ def compare_images(
         p_sim, d_sim, p_dist, d_dist, threshold=threshold
     )
 
+    algorithm_used = "pHash + dHash"
+
+    # Priority 3: Geometric verification via ORB (for crops, rotations, or divergent hashes)
+    if enable_orb and (not is_dup or (d_sim >= threshold and p_sim < 75.0)):
+        try:
+            from orb_detection import compare_images_orb
+            orb_res = compare_images_orb(img1_path, img2_path)
+            if orb_res.is_duplicate:
+                category = "Near Duplicate"
+                is_dup = True
+                algorithm_used = "ORB + RANSAC Homography"
+        except Exception as e:
+            logger.debug("ORB comparison fallback skipped: %s", e)
+
     return ComparisonResult(
         image_path_1=str(img1_path),
         image_path_2=str(img2_path),
@@ -273,7 +324,7 @@ def compare_images(
         phash_similarity=p_sim,
         dhash_distance=d_dist,
         dhash_similarity=d_sim,
-        detection_algorithm="pHash + dHash",
+        detection_algorithm=algorithm_used,
         duplicate_category=category,
         is_duplicate=is_dup,
     )
